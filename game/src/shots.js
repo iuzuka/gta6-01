@@ -1,79 +1,94 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Solmar Bay — staged screenshot states. The `shot` URL query picks a real
+// state of the game (never a mockup): the title screen, Milo driving through
+// downtown traffic, a police chase at three stars, or a mission in progress.
+// Each state is built from the same systems the player uses.
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+import { dist } from './util.js';
+import { makeCar } from './vehicles.js';
+import { addCrime, wantedStars } from './police.js';
+import { startMission } from './missions.js';
+import { enterCar } from './player.js';
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
+// Returns the shot name from the URL, or null for normal play.
+export function shotFromUrl() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    return q.get('shot');
+  } catch {
+    return null;
   }
-  return Infinity;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
+// Drive the game into the requested staged state. Runs after the world is
+// built; the main loop then keeps traffic, pedestrians and police moving.
+export function applyShot(G, name) {
+  const city = G.city;
+  if (name === 'start') {
+    G.screen = 'title';
+    return;
   }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
+  G.screen = 'play';
+  if (name === 'drive') {
+    // Milo in a red Vento, rolling down the downtown strip with traffic.
+    const car = G.traffic[0] || makeCar(1000, 600, 0, { color: '#c0392b', name: 'Vento' });
+    car.x = 1000;
+    car.y = 600;
+    car.angle = 0;
+    car.speed = 300;
+    car.traffic = false;
+    car.parked = false;
+    G.player.x = 1000;
+    G.player.y = 600;
+    enterCar(G.player, car);
+    if (!G.allCars.includes(car)) G.allCars.push(car);
+    G.player.health = 100;
+    G.clock = 16.5; // golden hour
+    G.keys.up = true; // keep the car rolling for the shot
+  } else if (name === 'chase') {
+    const car = makeCar(1400, 1000, Math.PI / 2, { color: '#c0392b', name: 'Vento' });
+    car.speed = 380;
+    G.player.x = 1400;
+    G.player.y = 1000;
+    enterCar(G.player, car);
+    if (!G.allCars.includes(car)) G.allCars.push(car);
+    // Clear the road ahead so the getaway is not born in a traffic jam.
+    G.traffic = G.traffic.filter((t) => dist(t.x, t.y, 1400, 1000) > 500);
+    G.allCars = G.allCars.filter((c) => !c.traffic || dist(c.x, c.y, 1400, 1000) > 500);
+    G.police.heat = addCrime(0, 'steal');
+    G.police.heat = addCrime(G.police.heat, 'shoot');
+    G.police.heat = addCrime(G.police.heat, 'shoot');
+    G.police.heat = addCrime(G.police.heat, 'speedPastCop');
+    G.police.stars = wantedStars(G.police.heat); // 3 stars
+    G.police.lastSeen = { x: 1400, y: 1000 };
+    // Two interceptors already on Milo's tail, close enough to see.
+    for (const [dx, dy, angle] of [[-260, -180, 0.6], [200, 260, -2.2]]) {
+      const cop = makeCar(1400 + dx, 1000 + dy, angle, { police: true, color: '#1f2a44', name: 'Interceptor', cruise: 330 });
+      cop.speed = 340;
+      G.police.cars.push(cop);
+      G.allCars.push(cop);
     }
+    G.clock = 19.2; // sunset, sirens on
+    G.keys.up = true; // keep the getaway rolling for the shot
+  } else if (name === 'mission') {
+    // Mission 2 in progress: the timed delivery, downtown at noon.
+    G.player.x = 600;
+    G.player.y = 1320;
+    G.player.health = 86;
+    G.player.ammo = 18;
+    G.clock = 11.0;
+    G.missions.index = 1; // start "The Package", not mission 1
+    startMission(G.missions, city, G.missionApi);
+    // Skip the pickup stage so the shot shows the timed delivery leg.
+    if (G.missions.active) {
+      G.missions.active.stageIndex = 1;
+      G.missions.active.timer = 82;
+      G.missions.active.dialogueIndex = 1;
+    }
+  } else if (name === 'play') {
+    G.player.x = 1000;
+    G.player.y = 600;
+    G.clock = 10.0;
   }
-  return best;
-}
-
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
-  }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
-  }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  G.camera.x = G.player.x;
+  G.camera.y = G.player.y;
 }
