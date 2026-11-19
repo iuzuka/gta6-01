@@ -11,10 +11,13 @@ export function makePlayer(x, y) {
     speed: 0,
     health: 100,
     maxHealth: 100,
+    armor: 0, // kevlar from Solmar Arms: absorbs damage before health
+    maxArmor: 100,
     cash: 250,
     ammo: 24,
     hasPistol: true,
-    weapon: 'pistol', // 'fist' | 'pistol'
+    hasSmg: false, // the VKR-9 from Solmar Arms; press 3 to use it
+    weapon: 'pistol', // 'fist' | 'pistol' | 'smg'
     inCar: null, // the car object Milo is driving, or null
     punchTimer: 0,
     shootCooldown: 0,
@@ -53,7 +56,10 @@ export function updatePlayerOnFoot(player, input, dt, collide) {
 
 export function hurtPlayer(player, amount) {
   if (player.dead || player.hurtTimer > 0.25) return;
-  player.health = Math.max(0, player.health - amount);
+  // Kevlar takes the hit first; only what is left reaches Milo.
+  const absorbed = Math.min(player.armor || 0, amount);
+  player.armor = (player.armor || 0) - absorbed;
+  player.health = Math.max(0, player.health - (amount - absorbed));
   player.hurtTimer = 0.35;
   if (player.health <= 0) player.dead = true;
 }

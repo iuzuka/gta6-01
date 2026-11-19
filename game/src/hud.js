@@ -5,6 +5,7 @@
 import { clamp, clockString, money } from './util.js';
 import { WORLD_W, WORLD_H, districtAt } from './city.js';
 import { missionObjective, currentDialogue, MISSIONS } from './missions.js';
+import { SHOP_ITEMS } from './shop.js';
 
 export function drawStars(ctx, stars, x, y) {
   for (let i = 0; i < 5; i++) {
@@ -64,7 +65,7 @@ export function drawHud(ctx, G, W, H) {
     ctx.fillText('HIDDEN — stay out of sight', 12, 74);
   }
 
-  // Bottom left: health bar and weapon.
+  // Bottom left: health bar, kevlar bar, and weapon.
   panel(ctx, 12, H - 66, 300, 54);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 13px system-ui, sans-serif';
@@ -74,9 +75,23 @@ export function drawHud(ctx, G, W, H) {
   ctx.fillRect(24, H - 38, 150, 10);
   ctx.fillStyle = p.health > 40 ? '#4ade80' : '#e63946';
   ctx.fillRect(24, H - 38, 150 * clamp(p.health / 100, 0, 1), 10);
+  if (p.armor > 0) {
+    ctx.fillStyle = '#222';
+    ctx.fillRect(180, H - 38, 60, 10);
+    ctx.fillStyle = '#4aa8ff';
+    ctx.fillRect(180, H - 38, 60 * clamp(p.armor / 100, 0, 1), 10);
+    ctx.fillStyle = '#cfe3ff';
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.fillText('KEVLAR', 180, H - 42);
+  }
   ctx.fillStyle = '#fff';
   ctx.font = '13px system-ui, sans-serif';
-  ctx.fillText(p.weapon === 'pistol' ? 'Pistol  •  ' + p.ammo + ' rounds  [click to fire]' : 'Fists  [click to punch]', 24, H - 18);
+  const weaponLine = p.weapon === 'pistol'
+    ? 'Pistol  •  ' + p.ammo + ' rounds  [click to fire]'
+    : p.weapon === 'smg'
+      ? 'VKR-9 SMG  •  ' + p.ammo + ' rounds  [hold click]'
+      : 'Fists  [click to punch]';
+  ctx.fillText(weaponLine, 24, H - 18);
 
   // Bottom right: speed when driving, or a hint on foot.
   if (p.inCar) {
@@ -111,7 +126,7 @@ export function drawHud(ctx, G, W, H) {
     ctx.fillStyle = '#fff';
     ctx.font = '13px system-ui, sans-serif';
     lines.forEach((l, i) => ctx.fillText(l, 22, 108 + i * 20));
-  } else if (G.missions.index < 5) {
+  } else if (G.missions.index < MISSIONS.length) {
     panel(ctx, 12, 66, 300, 44);
     ctx.fillStyle = '#ffd34d';
     ctx.font = 'bold 13px system-ui, sans-serif';
@@ -149,8 +164,17 @@ export function drawHud(ctx, G, W, H) {
     ctx.textAlign = 'left';
   }
 
-  // "Press E" prompt near a car.
-  if (G.nearCar && !p.inCar) {
+  // "Press E" prompt near a car, or near the gun shop.
+  if (G.nearShop && !p.inCar) {
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    const t = 'Press E to enter Solmar Arms — guns, ammo, kevlar';
+    const tw = ctx.measureText(t).width;
+    panel(ctx, (W - tw) / 2 - 12, H - 210, tw + 24, 30, 0.7);
+    ctx.fillStyle = '#ffe27a';
+    ctx.textAlign = 'center';
+    ctx.fillText(t, W / 2, H - 190);
+    ctx.textAlign = 'left';
+  } else if (G.nearCar && !p.inCar) {
     ctx.font = 'bold 15px system-ui, sans-serif';
     const t = 'Press E to get in the ' + G.nearCar.name;
     const tw = ctx.measureText(t).width;
@@ -309,7 +333,7 @@ export function drawTitle(ctx, W, H, hasSave, missionIndex) {
   ctx.font = 'bold 18px system-ui, sans-serif';
   ctx.fillText('▶  NEW GAME', bx - 40, by);
   if (hasSave) {
-    ctx.fillText('▶  CONTINUE  (mission ' + (missionIndex + 1) + ' of 5)', bx - 40, by + 34);
+    ctx.fillText('▶  CONTINUE  (mission ' + (missionIndex + 1) + ' of ' + MISSIONS.length + ')', bx - 40, by + 34);
   }
   ctx.font = '15px system-ui, sans-serif';
   ctx.fillStyle = '#cfe3ff';
@@ -332,7 +356,7 @@ export function drawPause(ctx, W, H, G) {
   ctx.fillStyle = '#fff';
   ctx.font = '17px system-ui, sans-serif';
   ctx.fillText('Esc resume  •  S save game  •  M mission log  •  Q quit to title', W / 2, H * 0.3 + 36);
-  ctx.fillText('Cash ' + money(G.player.cash) + '   •   Missions done ' + G.missions.done.length + ' / 5', W / 2, H * 0.3 + 66);
+  ctx.fillText('Cash ' + money(G.player.cash) + '   •   Missions done ' + G.missions.done.length + ' / ' + MISSIONS.length + '   •   Stashes ' + (G.stashes ? G.stashes.found : 0) + ' / 12', W / 2, H * 0.3 + 66);
   ctx.textAlign = 'left';
 }
 
@@ -363,6 +387,44 @@ export function drawMissionLog(ctx, W, H, G) {
   ctx.fillStyle = '#cfe3ff';
   ctx.font = '14px system-ui, sans-serif';
   ctx.fillText('Press M or Esc to close.', bx + 24, H - 120);
+  ctx.textAlign = 'left';
+}
+
+export function drawShop(ctx, W, H, G, shopMessage) {
+  ctx.fillStyle = 'rgba(5,8,14,0.78)';
+  ctx.fillRect(0, 0, W, H);
+  const bw = Math.min(620, W - 80);
+  const bx = (W - bw) / 2;
+  panel(ctx, bx, 80, bw, 320, 0.92);
+  ctx.fillStyle = '#ffd34d';
+  ctx.font = 'bold 26px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('SOLMAR ARMS — GUN SHOP', bx + 24, 122);
+  ctx.fillStyle = '#fff';
+  ctx.font = '16px system-ui, sans-serif';
+  ctx.fillText('Your cash: ' + money(G.player.cash), bx + 24, 150);
+  let y = 188;
+  for (const item of SHOP_ITEMS) {
+    const owned = item.id === 'smg' && G.player.hasSmg;
+    const full = item.id === 'armor' && G.player.armor >= G.player.maxArmor;
+    const afford = G.player.cash >= item.price;
+    ctx.fillStyle = owned || full ? '#4ade80' : afford ? '#ffd34d' : '#8a8f96';
+    ctx.font = 'bold 17px system-ui, sans-serif';
+    const tag = owned ? 'OWNED' : full ? 'FULL' : '[' + item.key + '] ' + money(item.price);
+    ctx.fillText(tag + '  ' + item.name, bx + 24, y);
+    ctx.fillStyle = '#dfe6ee';
+    ctx.font = '14px system-ui, sans-serif';
+    ctx.fillText(item.desc, bx + 44, y + 20);
+    y += 52;
+  }
+  ctx.fillStyle = '#cfe3ff';
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.fillText('Press 1 / 2 / 3 to buy. Esc to leave the shop.', bx + 24, 80 + 320 - 44);
+  if (shopMessage) {
+    ctx.fillStyle = '#ff9a9a';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.fillText(shopMessage, bx + 24, 80 + 320 - 18);
+  }
   ctx.textAlign = 'left';
 }
 

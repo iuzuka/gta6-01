@@ -35,10 +35,10 @@ function fakeApi(playerPos) {
   };
 }
 
-test('there are five missions with rising rewards', () => {
-  assert.equal(MISSIONS.length, 5);
+test('there are eight missions with rising rewards', () => {
+  assert.equal(MISSIONS.length, 8);
   const rewards = MISSIONS.map((m) => m.reward);
-  assert.deepEqual(rewards, [150, 300, 450, 800, 1200]);
+  assert.deepEqual(rewards, [150, 300, 450, 800, 1200, 1500, 2000, 3000]);
   for (const m of MISSIONS) {
     assert.ok(m.name && m.giver && m.brief && m.stages.length >= 2);
   }

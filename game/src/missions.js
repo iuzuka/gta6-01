@@ -1,4 +1,4 @@
-// Solmar Bay — the story: five missions for Milo Reyes, a driver-for-hire
+// Solmar Bay — the story: eight missions for Milo Reyes, a driver-for-hire
 // pulled back into the underworld by his old friend Rosa Vega. Each mission
 // is a small state machine: stages advance on waypoints, timers, kills and
 // deliveries, and every mission pays cash on success and can fail outright.
@@ -72,6 +72,47 @@ export const MISSIONS = [
       { who: 'Milo Reyes', text: 'Then we drive like the city owes us. Because it does.' },
     ],
   },
+  {
+    id: 'm6', name: 'The Docks Deal', giver: 'Dante Cole', reward: 1500,
+    brief: "Dante's buyers are waiting at the casino, but the rival crew hit the docks first. Clear them out, then run the case to the casino in 120 seconds.",
+    stages: [
+      { kind: 'goto', label: 'Reach the Harbor Docks', target: 'docks' },
+      { kind: 'fight', label: 'Clear the docks — 5 rivals', target: 'docks' },
+      { kind: 'timed', label: 'Run the case to the Golden Palm Casino', target: 'casino', time: 120 },
+      { kind: 'done', label: 'The deal is done' },
+    ],
+    dialogue: [
+      { who: 'Dante Cole', text: 'The case is at the docks and the Vipers got there first. Five of them. Take it back.' },
+      { who: 'Dante Cole', text: 'When the docks are clear, the buyers are at the Golden Palm. Two minutes, Milo. Do not be late.' },
+    ],
+  },
+  {
+    id: 'm7', name: 'Night at the Casino', giver: 'Rosa Vega', reward: 2000, night: true,
+    brief: 'The Golden Palm Casino skims the crew money every night. Walk in after dark, take the vault cash from six guards, and slip out to the Hideout.',
+    stages: [
+      { kind: 'goto', label: 'Reach the Golden Palm Casino', target: 'casino' },
+      { kind: 'fight', label: 'Clear the casino floor — 6 guards', target: 'casino' },
+      { kind: 'goto', label: 'Escape to the Hideout', target: 'hideout' },
+      { kind: 'done', label: 'The vault is empty' },
+    ],
+    dialogue: [
+      { who: 'Rosa Vega', text: 'The Golden Palm skims our money every single night. Tonight we skim it back. Six guards. Bring the loud one.' },
+      { who: 'Milo Reyes', text: 'A casino heist at night. Rosa, you always did know how to plan a date.' },
+    ],
+  },
+  {
+    id: 'm8', name: 'The Last Ferry', giver: 'Rosa Vega', reward: 3000,
+    brief: 'One last run. Pick Rosa up at the Marina Pier with every cop in Solmar Bay on your tail — the helicopter included — and make the midnight ferry.',
+    stages: [
+      { kind: 'goto', label: 'Pick up Rosa at the Marina Pier', target: 'marina' },
+      { kind: 'chase', label: 'Lose the police and reach the Last Ferry', target: 'ferry' },
+      { kind: 'done', label: 'Solmar Bay is behind you' },
+    ],
+    dialogue: [
+      { who: 'Rosa Vega', text: 'The ferry leaves at midnight, Milo. Every cop in the city will be between us and it. Drive like you mean it.' },
+      { who: 'Milo Reyes', text: 'Then we drive. And when we are on that ferry, this city can keep its noise.' },
+    ],
+  },
 ];
 
 export function makeMissionState() {
@@ -91,6 +132,7 @@ export function currentMissionDef(state) {
 export function startMission(state, world, api) {
   const def = currentMissionDef(state);
   if (!def || state.active) return false;
+  if (def.night && api.setClock) api.setClock(21.5); // a night job starts after dark
   state.active = {
     def,
     stageIndex: 0,
@@ -144,18 +186,24 @@ function advanceStage(state, api) {
   } else if (stage.kind === 'fight' && state.active.def.id === 'm4') {
     api.spawnBankGuards();
     state.active.enemiesSpawned = true;
+  } else if (stage.kind === 'fight' && state.active.def.id === 'm6') {
+    api.spawnRivalCrew();
+    state.active.enemiesSpawned = true;
+  } else if (stage.kind === 'fight' && state.active.def.id === 'm7') {
+    api.spawnCasinoGuards();
+    state.active.enemiesSpawned = true;
   } else if (stage.kind === 'fight') {
     api.spawnCourierCrew();
     state.active.enemiesSpawned = true;
   }
   if (stage.kind === 'timed') state.active.timer = stage.time;
-  if (stage.kind === 'chase') api.raiseWanted(3);
+  if (stage.kind === 'chase') api.raiseWanted(state.active.def.id === 'm8' ? 5 : 3);
 }
 
 function completeMission(state, api) {
   const def = state.active.def;
   state.done.push(def.id);
-  state.index = Math.min(5, state.index + 1);
+  state.index = Math.min(8, state.index + 1);
   api.addCash(def.reward);
   api.toast('Mission complete: ' + def.name + ' — earned ' + money(def.reward));
   api.sfxMission();

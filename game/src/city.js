@@ -133,8 +133,18 @@ export function buildCity(seed = 7) {
     boats.push({ x: 3300 + (i % 3) * 70, y: 260 + i * 110, angle: range(rng, -0.3, 0.3), len: range(rng, 46, 78) });
   }
 
+  // Streetlights: one every 400 units along each road, offset to the
+  // roadside. They only glow after dark, so they cost nothing by day.
+  const lights = [];
+  for (const rx of ROAD_XS) {
+    for (let y = 200; y < WORLD_H; y += 400) lights.push({ x: rx + ROAD_W / 2 + 10, y });
+  }
+  for (const ry of ROAD_YS) {
+    for (let x = 200; x < WORLD_W; x += 400) lights.push({ x, y: ry + ROAD_W / 2 + 10 });
+  }
+
   return {
-    buildings, parks, palms, boats,
+    buildings, parks, palms, boats, lights,
     hospital: { x: 600, y: 1000, w: 240, h: 160, name: 'Solmar General Hospital' },
     garage: { x: 1400, y: 600, w: 220, h: 150, name: "Milo's Garage" },
     // Mission landmarks, spread across the map.
@@ -146,6 +156,10 @@ export function buildCity(seed = 7) {
       hotel: { x: 1000, y: 1000, label: 'Palms Hotel' },
       bank: { x: 1800, y: 1000, label: 'Bay Credit Bank' },
       hideout: { x: 2600, y: 1800, label: 'The Hideout' },
+      gunshop: { x: 1800, y: 1400, label: 'Solmar Arms' },
+      casino: { x: 1000, y: 200, label: 'Golden Palm Casino' },
+      docks: { x: 600, y: 1800, label: 'Harbor Docks' },
+      ferry: { x: 3200, y: 700, label: 'The Last Ferry' },
     },
   };
 }

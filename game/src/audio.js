@@ -82,6 +82,8 @@ export const sfx = {
   punch() { noiseBurst(0.08, 0.35, 900); tone(120, 0.08, 'sine', 0.3, 70); },
   crash() { noiseBurst(0.3, 0.5, 700); tone(90, 0.25, 'sawtooth', 0.2, 40); },
   pickup() { tone(660, 0.09, 'sine', 0.25); setTimeout(() => tone(990, 0.12, 'sine', 0.25), 70); },
+  buy() { tone(880, 0.08, 'triangle', 0.25); setTimeout(() => tone(1174, 0.1, 'triangle', 0.25), 80); setTimeout(() => tone(1568, 0.16, 'triangle', 0.25), 170); },
+  noCash() { tone(160, 0.22, 'sawtooth', 0.2, 110); },
   mission() { tone(523, 0.14, 'triangle', 0.3); setTimeout(() => tone(659, 0.14, 'triangle', 0.3), 130); setTimeout(() => tone(784, 0.22, 'triangle', 0.3), 260); },
   fail() { tone(220, 0.25, 'sawtooth', 0.2, 110); },
   click() { tone(900, 0.04, 'square', 0.12); },

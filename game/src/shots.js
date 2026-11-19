@@ -1,7 +1,8 @@
 // Solmar Bay — staged screenshot states. The `shot` URL query picks a real
 // state of the game (never a mockup): the title screen, Milo driving through
-// downtown traffic, a police chase at three stars, or a mission in progress.
-// Each state is built from the same systems the player uses.
+// downtown traffic, a four-star police chase at night with the SBPD
+// helicopter overhead, or the casino heist in progress. Each state is built
+// from the same systems the player uses.
 
 import { dist } from './util.js';
 import { makeCar } from './vehicles.js';
@@ -58,7 +59,8 @@ export function applyShot(G, name) {
     G.police.heat = addCrime(G.police.heat, 'shoot');
     G.police.heat = addCrime(G.police.heat, 'shoot');
     G.police.heat = addCrime(G.police.heat, 'speedPastCop');
-    G.police.stars = wantedStars(G.police.heat); // 3 stars
+    G.police.heat = addCrime(G.police.heat, 'killCop');
+    G.police.stars = wantedStars(G.police.heat); // 4 stars
     G.police.lastSeen = { x: 1400, y: 1000 };
     // Two interceptors already on Milo's tail, close enough to see.
     for (const [dx, dy, angle] of [[-260, -180, 0.6], [200, 260, -2.2]]) {
@@ -67,22 +69,25 @@ export function applyShot(G, name) {
       G.police.cars.push(cop);
       G.allCars.push(cop);
     }
-    G.clock = 19.2; // sunset, sirens on
+    // The SBPD helicopter, circling above the getaway with its searchlight.
+    G.police.heli = { x: 1560, y: 820, angle: 0.8, rotor: 0, timeLeft: 30, shootTimer: 2 };
+    G.clock = 21.5; // night, sirens on, searchlight sweeping
     G.keys.up = true; // keep the getaway rolling for the shot
   } else if (name === 'mission') {
-    // Mission 2 in progress: the timed delivery, downtown at noon.
-    G.player.x = 600;
-    G.player.y = 1320;
+    // Mission 7 in progress: the casino heist at night, guards on the floor.
+    G.player.x = 1000;
+    G.player.y = 320;
     G.player.health = 86;
-    G.player.ammo = 18;
-    G.clock = 11.0;
-    G.missions.index = 1; // start "The Package", not mission 1
+    G.player.ammo = 24;
+    G.clock = 21.5;
+    G.missions.index = 6; // start "Night at the Casino", not mission 1
     startMission(G.missions, city, G.missionApi);
-    // Skip the pickup stage so the shot shows the timed delivery leg.
+    // Skip the arrival stage so the shot shows the casino-floor fight.
     if (G.missions.active) {
       G.missions.active.stageIndex = 1;
-      G.missions.active.timer = 82;
+      G.missions.active.enemiesSpawned = true;
       G.missions.active.dialogueIndex = 1;
+      G.missionApi.spawnCasinoGuards();
     }
   } else if (name === 'play') {
     G.player.x = 1000;

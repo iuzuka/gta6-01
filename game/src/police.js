@@ -55,7 +55,63 @@ export function makePolice() {
     cars: [],
     officers: [],
     spawnTimer: 0,
+    heli: null, // the SBPD helicopter: up at 4 stars, gone again after a while
+    heliCooldown: 0, // seconds before it can come back after leaving
   };
+}
+
+// The helicopter flies at 4 and 5 stars, as long as it is not already up
+// and its break after the last sortie has passed.
+export function heliShouldSpawn(police) {
+  return police.stars >= 4 && !police.heli && police.heliCooldown <= 0;
+}
+
+const HELI_SORTIE = 30; // seconds the helicopter stays up
+const HELI_BREAK = 25; // seconds before it can return
+const HELI_SPEED = 420; // it is faster than any car
+
+function spawnHeli(police, near) {
+  police.heli = {
+    x: near.x + 260,
+    y: near.y - 320,
+    angle: 0,
+    rotor: 0,
+    timeLeft: HELI_SORTIE,
+    shootTimer: 2,
+  };
+}
+
+// One tick of helicopter logic. Pure enough for tests: it takes the
+// player's position and an events object with onHeliShot, and returns
+// nothing — the helicopter lives on the police object.
+export function updateHelicopter(police, dt, playerPos, events) {
+  const heli = police.heli;
+  if (!heli) {
+    police.heliCooldown = Math.max(0, police.heliCooldown - dt);
+    return;
+  }
+  heli.rotor += dt * 28;
+  heli.timeLeft -= dt;
+  if (heli.timeLeft <= 0) {
+    police.heli = null;
+    police.heliCooldown = HELI_BREAK;
+    return;
+  }
+  // Circle above the player, a little ahead of where they are going.
+  const want = Math.atan2(playerPos.y - heli.y, playerPos.x - heli.x);
+  heli.angle = turnToward(heli.angle, want, 2.6 * dt);
+  const d = dist(heli.x, heli.y, playerPos.x, playerPos.y);
+  const speed = d > 240 ? HELI_SPEED : HELI_SPEED * 0.5;
+  heli.x += Math.cos(heli.angle) * speed * dt;
+  heli.y += Math.sin(heli.angle) * speed * dt;
+  // At 5 stars it shoots down at the player.
+  heli.shootTimer -= dt;
+  if (police.stars >= 5 && d < 460 && heli.shootTimer <= 0) {
+    heli.shootTimer = 2.2;
+    if (events && events.onHeliShot) {
+      events.onHeliShot(heli.x, heli.y, Math.atan2(playerPos.y - heli.y, playerPos.x - heli.x));
+    }
+  }
 }
 
 function spawnCopCar(police, rng, near) {
@@ -88,15 +144,23 @@ function spawnOfficer(police, rng, near) {
 export function updatePolice(police, dt, rng, player, playerCar, events) {
   police.stars = wantedStars(police.heat);
   if (police.stars === 0) {
-    // Stand down: cars drive off, officers walk away.
+    // Stand down: cars drive off, officers walk away, the helicopter leaves.
     police.cars = [];
     police.officers = [];
+    if (police.heli) {
+      police.heli = null;
+      police.heliCooldown = HELI_BREAK;
+    } else {
+      police.heliCooldown = Math.max(0, police.heliCooldown - dt);
+    }
     police.hiddenTimer += dt;
     return;
   }
   // Seeing the player resets the hidden timer; hiding grows it.
   const playerPos = playerCar || player;
   let anySees = false;
+  // The helicopter never loses the player while it is up.
+  if (police.heli) anySees = true;
   for (const car of police.cars) {
     if (dist(car.x, car.y, playerPos.x, playerPos.y) < 700) anySees = true;
   }
@@ -114,6 +178,8 @@ export function updatePolice(police, dt, rng, player, playerCar, events) {
 
   // Keep the right number of units in the field.
   police.spawnTimer -= dt;
+  if (heliShouldSpawn(police)) spawnHeli(police, playerPos);
+  updateHelicopter(police, dt, playerPos, events);
   const wantCars = Math.min(copsForStars(police.stars), police.stars >= 3 ? 3 : 2);
   if (police.cars.length < wantCars && police.spawnTimer <= 0) {
     spawnCopCar(police, rng, playerPos);
@@ -165,6 +231,47 @@ export function updatePolice(police, dt, rng, player, playerCar, events) {
     }
   }
   police.officers = police.officers.filter((o) => o.health > 0);
+}
+
+export function drawHelicopter(ctx, heli, night) {
+  ctx.save();
+  ctx.translate(heli.x, heli.y);
+  // Searchlight cone at night, sweeping toward the player below.
+  if (night) {
+    ctx.fillStyle = 'rgba(255,240,170,0.10)';
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-70, 150);
+    ctx.lineTo(70, 150);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Rotor, spinning fast enough to blur.
+  ctx.strokeStyle = 'rgba(30,30,40,0.85)';
+  ctx.lineWidth = 3;
+  const r = heli.rotor % Math.PI;
+  ctx.beginPath();
+  ctx.moveTo(-34 * Math.cos(r), -34 * Math.sin(r));
+  ctx.lineTo(34 * Math.cos(r), 34 * Math.sin(r));
+  ctx.stroke();
+  // Shadow, body, tail and skids.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(4, 6, 16, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1f2a44';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 15, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#2a6fd6';
+  ctx.beginPath();
+  ctx.arc(8, -2, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#1f2a44';
+  ctx.fillRect(-26, -2, 14, 4);
+  ctx.fillStyle = '#e63946';
+  ctx.fillRect(-28, -2, 4, 4);
+  ctx.restore();
 }
 
 export function drawOfficer(ctx, off) {

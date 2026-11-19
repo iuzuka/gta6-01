@@ -5,6 +5,9 @@
 // /output in the grader) and writes /output/dossier.json, the summary the
 // judge reads, using the vendored make.fun library. Nothing is installed,
 // nothing is fetched, nothing is built — the game is plain static files.
+// v2 (Nov 2026): eight missions, Solmar Arms gun shop (SMG + kevlar),
+// twelve hidden stashes, the SBPD helicopter, night streetlights and
+// headlight cones — the same entry program, the game got bigger.
 //
 // Run it locally to check the entry before submitting:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
@@ -16,6 +19,14 @@ import { buildDossier } from './vendor/makefun-game.ts';
 
 const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+// v2 systems that must ship with the entry — fail fast if one is missing,
+// rather than handing the judge a game with a broken shop or a missing heli.
+for (const required of ['game/src/shop.js', 'game/src/collectibles.js']) {
+  if (!existsSync(join(repoRoot, required))) {
+    throw new Error(`Solmar Bay entry is missing ${required}`);
+  }
+}
 
 // Start from a clean output directory so stale files never leak into an entry.
 mkdirSync(outDir, { recursive: true });

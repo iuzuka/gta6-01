@@ -7,11 +7,13 @@ import { buildCity, districtAt, isBeach, isOnRoad, isWater, ROAD_W, ROAD_XS, ROA
 import { makePlayer, updatePlayerOnFoot, hurtPlayer, healPlayer, nearestEnterableCar, enterCar, exitCar, drawPlayer } from './player.js';
 import { spawnTraffic, spawnParked, driveCar, updateTraffic, collideCars, drawCar } from './vehicles.js';
 import { spawnPedestrians, updatePedestrians, drawPedestrian } from './pedestrians.js';
-import { makePolice, addCrime, wantedStars, updatePolice, escapeRadius, drawOfficer } from './police.js';
+import { makePolice, addCrime, wantedStars, updatePolice, escapeRadius, drawOfficer, drawHelicopter } from './police.js';
 import { makeBullets, fireBullet, updateBullets, drawBullets, meleeHit, makeEnemy, updateEnemies, drawEnemy } from './combat.js';
 import { makeMissionState, startMission, updateMission, missionWaypoint } from './missions.js';
+import { makeCollectibles, stashNear, collectStash, applyTakenStashes, takenStashIds, drawStash } from './collectibles.js';
+import { buyShopItem, buyBlockReason, nearShop } from './shop.js';
 import { makeParticles, spawnDust, spawnSparks, spawnSmoke, spawnMuzzle, addSkid, updateParticles, drawParticles } from './particles.js';
-import { drawHud, drawTitle, drawPause, drawMissionLog, drawGameOver } from './hud.js';
+import { drawHud, drawTitle, drawPause, drawMissionLog, drawGameOver, drawShop } from './hud.js';
 import { sfx, audioInit, sirenStart, sirenStop, engineStart, engineSet, engineStop, musicStart } from './audio.js';
 import { saveGame, loadGame, hasSave } from './save.js';
 import { shotFromUrl, applyShot } from './shots.js';
@@ -37,7 +39,7 @@ const rng = makeRng(20261117);
 const city = buildCity(7);
 
 const G = {
-  screen: 'title', // title | play | pause | log | over
+  screen: 'title', // title | play | pause | log | over | shop
   player: makePlayer(1400, 660),
   city,
   cityRoadXs: ROAD_XS,
@@ -48,6 +50,9 @@ const G = {
   peds: [],
   police: makePolice(),
   missions: makeMissionState(),
+  stashes: makeCollectibles(),
+  nearShop: false,
+  shopMessage: '',
   enemies: [],
   bullets: makeBullets(),
   particles: makeParticles(),
@@ -111,16 +116,34 @@ G.missionApi = {
     G.enemies.push(makeEnemy(c.x + 30, c.y - 20, { name: 'Crew' }));
     G.enemies.push(makeEnemy(c.x, c.y + 30, { name: 'Crew', health: 90 }));
   },
+  spawnRivalCrew: () => {
+    const d = city.landmarks.docks;
+    const spots = [[-50, -40], [50, -40], [-50, 40], [50, 40], [0, -70]];
+    for (const [dx, dy] of spots) {
+      G.enemies.push(makeEnemy(d.x + dx, d.y + dy, { name: 'Viper' }));
+    }
+  },
+  spawnCasinoGuards: () => {
+    const c = city.landmarks.casino;
+    const spots = [[-60, -40], [60, -40], [-60, 40], [60, 40], [-20, -70], [20, 70]];
+    for (const [i, [dx, dy]] of spots.entries()) {
+      G.enemies.push(makeEnemy(c.x + dx, c.y + dy, { name: 'Guard', health: i < 2 ? 90 : 70 }));
+    }
+  },
+  setClock: (h) => { G.clock = h; },
 };
 
 function snapshot() {
   return {
     cash: G.player.cash,
     health: G.player.health,
+    armor: G.player.armor,
     ammo: G.player.ammo,
     hasPistol: G.player.hasPistol,
+    hasSmg: G.player.hasSmg,
     missionIndex: G.missions.index,
     missionsDone: G.missions.done,
+    stashes: takenStashIds(G.stashes),
     x: G.player.x,
     y: G.player.y,
     clock: G.clock,
@@ -132,14 +155,17 @@ function snapshot() {
 function applyLoadedSave(s) {
   G.player.cash = s.cash;
   G.player.health = s.health;
+  G.player.armor = s.armor;
   G.player.ammo = s.ammo;
   G.player.hasPistol = s.hasPistol;
+  G.player.hasSmg = s.hasSmg;
   G.player.x = s.playerX;
   G.player.y = s.playerY;
   G.player.totalEarned = s.totalEarned;
   G.player.carsStolen = s.carsStolen;
   G.missions.index = s.missionIndex;
   G.missions.done = s.missionsDone.slice();
+  applyTakenStashes(G.stashes, s.stashes);
   G.clock = s.clock;
   G.camera.x = s.playerX;
   G.camera.y = s.playerY;
@@ -167,10 +193,11 @@ window.addEventListener('keydown', (e) => {
     if (G.screen === 'play') G.screen = 'pause';
     else if (G.screen === 'pause') G.screen = 'play';
     else if (G.screen === 'log') G.screen = 'pause';
+    else if (G.screen === 'shop') G.screen = 'play';
   }
   if (e.code === 'KeyM') {
     if (G.screen === 'play') {
-      if (!G.missions.active && G.missions.index < 5) {
+      if (!G.missions.active && G.missions.index < 8) {
         startMission(G.missions, city, G.missionApi);
       } else {
         G.screen = 'log';
@@ -178,9 +205,36 @@ window.addEventListener('keydown', (e) => {
     } else if (G.screen === 'log') G.screen = 'play';
     else if (G.screen === 'pause') G.screen = 'log';
   }
-  if (e.code === 'KeyE' && G.screen === 'play') tryEnterExitCar();
+  if (e.code === 'KeyE' && G.screen === 'play') {
+    // The gun shop beats the car door: E at Solmar Arms opens the shop.
+    if (G.nearShop) {
+      G.screen = 'shop';
+      G.shopMessage = '';
+      sfx.click();
+      return;
+    }
+    tryEnterExitCar();
+  }
   if (e.code === 'Digit1' && G.screen === 'play') G.player.weapon = 'fist';
   if (e.code === 'Digit2' && G.screen === 'play' && G.player.hasPistol) G.player.weapon = 'pistol';
+  if (e.code === 'Digit3' && G.screen === 'play' && G.player.hasSmg) G.player.weapon = 'smg';
+  if (G.screen === 'shop' && (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3')) {
+    const itemId = { Digit1: 'ammo', Digit2: 'smg', Digit3: 'armor' }[e.code];
+    const reason = buyBlockReason(G.player, itemId);
+    if (reason) {
+      G.shopMessage = reason === 'not enough cash'
+        ? 'Not enough cash for that.'
+        : reason === 'already owned' ? 'You already own the VKR-9.'
+          : reason === 'armor already full' ? 'Your kevlar is already full.'
+            : 'Cannot buy that.';
+      sfx.noCash();
+    } else {
+      buyShopItem(G.player, itemId);
+      G.shopMessage = '';
+      sfx.buy();
+      saveGame(snapshot());
+    }
+  }
   if (e.code === 'KeyS' && G.screen === 'pause') {
     if (saveGame(snapshot())) { G.missions.message = 'Game saved.'; G.missions.messageTimer = 3; }
   }
@@ -200,9 +254,11 @@ canvas.addEventListener('mousemove', (e) => {
 canvas.addEventListener('mousedown', (e) => {
   audioInit();
   if (e.button !== 0) return;
+  G.mouse.down = true;
   if (G.screen === 'title') { startNewGame(false); return; }
   if (G.screen === 'play') shoot();
 });
+canvas.addEventListener('mouseup', () => { G.mouse.down = false; });
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function startNewGame(continueSave) {
@@ -300,14 +356,16 @@ function shoot() {
   if (p.weapon === 'fist') { punch(); return; }
   if (p.shootCooldown > 0) return;
   if (p.ammo <= 0) {
-    G.missions.message = 'Out of ammo — find a gun shop (coming soon) or use fists [1].';
+    G.missions.message = 'Out of ammo — buy more at Solmar Arms, or use fists [1].';
     G.missions.messageTimer = 2.5;
     return;
   }
   p.ammo--;
-  p.shootCooldown = 0.22;
+  // The SMG spits rounds fast and light; the pistol is slow and heavy.
+  const isSmg = p.weapon === 'smg';
+  p.shootCooldown = isSmg ? 0.09 : 0.22;
   const angle = aimAngle();
-  fireBullet(G.bullets, p.x, p.y, angle, { fromPlayer: true });
+  fireBullet(G.bullets, p.x, p.y, angle, { fromPlayer: true, damage: isSmg ? 22 : 34 });
   spawnMuzzle(G.particles, p.x, p.y, angle);
   sfx.shot();
   G.shake = Math.max(G.shake, 2.5);
@@ -356,6 +414,25 @@ function update(dt) {
 
   const p = G.player;
   if (p.dead) return;
+
+  // Hold the mouse to keep the SMG firing.
+  if (G.mouse.down && p.weapon === 'smg' && !p.inCar) shoot();
+
+  // Hidden stashes: walk or drive over one to pocket $75.
+  const stash = stashNear(G.stashes, p.x, p.y);
+  if (stash) {
+    collectStash(G.stashes, stash.id);
+    p.cash += 75;
+    p.totalEarned += 75;
+    G.missions.message = 'Found a hidden stash! +$75  (' + G.stashes.found + '/12)';
+    G.missions.messageTimer = 3;
+    sfx.pickup();
+    spawnSparks(G.particles, stash.x, stash.y, 8);
+    saveGame(snapshot());
+  }
+
+  // Is Milo at the gun shop door?
+  G.nearShop = nearShop(p, city.landmarks.gunshop);
 
   // --- Player ---
   if (p.inCar) {
@@ -454,6 +531,11 @@ function update(dt) {
       fireBullet(G.bullets, x, y, angle, { fromPlayer: false, damage: 9 });
       sfx.shot();
     },
+    onHeliShot: (x, y, angle) => {
+      fireBullet(G.bullets, x, y, angle, { fromPlayer: false, damage: 6 });
+      spawnMuzzle(G.particles, x, y, angle);
+      sfx.shot();
+    },
   });
   G.escapeRadius = escapeRadius(G.police.stars);
   // Police cars slide around buildings instead of driving through roofs.
@@ -501,8 +583,8 @@ function update(dt) {
   // --- Missions ---
   updateMission(G.missions, city, G.missionApi, dt);
   G.waypoint = missionWaypoint(G.missions, city);
-  if (!G.waypoint && !G.missions.active && G.missions.index < 5) {
-    const def = { 0: 'garage', 1: 'market', 2: 'garage', 3: 'bank', 4: 'marina' }[G.missions.index];
+  if (!G.waypoint && !G.missions.active && G.missions.index < 8) {
+    const def = { 0: 'garage', 1: 'market', 2: 'garage', 3: 'bank', 4: 'marina', 5: 'docks', 6: 'casino', 7: 'marina' }[G.missions.index];
     const lm = city.landmarks[def];
     G.waypoint = { x: lm.x, y: lm.y, label: lm.label };
   }
@@ -628,6 +710,22 @@ function render() {
     for (let x = 40; x < WORLD_W; x += 64) ctx.fillRect(x, ry - 2, 28, 4);
   }
 
+  // Streetlights glow after dark so the night city reads as a city.
+  if (G.clock >= 19.5 || G.clock < 5) {
+    ctx.fillStyle = 'rgba(255,220,120,0.5)';
+    for (const l of city.lights) {
+      ctx.beginPath();
+      ctx.arc(l.x, l.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(255,220,120,0.07)';
+    for (const l of city.lights) {
+      ctx.beginPath();
+      ctx.arc(l.x, l.y, 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   // Buildings with a fake 3D wall and windows.
   for (const b of city.buildings) {
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
@@ -656,7 +754,29 @@ function render() {
   ctx.fillStyle = '#fff';
   ctx.fillText('🏥 ' + city.hospital.name, city.hospital.x + city.hospital.w / 2, city.hospital.y + city.hospital.h + 18);
   ctx.fillText("🔧 " + city.garage.name, city.garage.x + city.garage.w / 2, city.garage.y + city.garage.h + 18);
+  // New landmarks get the same treatment so the player can find them.
+  ctx.fillText('🔫 Solmar Arms', city.landmarks.gunshop.x, city.landmarks.gunshop.y + 52);
+  ctx.fillText('🎰 Golden Palm Casino', city.landmarks.casino.x, city.landmarks.casino.y + 52);
+  ctx.fillText('⚓ Harbor Docks', city.landmarks.docks.x, city.landmarks.docks.y + 52);
+  ctx.fillText('⛴ The Last Ferry', city.landmarks.ferry.x, city.landmarks.ferry.y + 52);
   ctx.textAlign = 'left';
+
+  // Neon signs: the casino and the gun shop glow after dark.
+  const isNight = G.clock >= 19.5 || G.clock < 5;
+  if (isNight) {
+    const neonPulse = 0.55 + Math.sin(G.time * 3) * 0.2;
+    ctx.fillStyle = `rgba(190,80,255,${neonPulse})`;
+    ctx.fillRect(city.landmarks.casino.x - 70, city.landmarks.casino.y - 46, 140, 26);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 15px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('★ CASINO ★', city.landmarks.casino.x, city.landmarks.casino.y - 26);
+    ctx.fillStyle = `rgba(255,140,40,${neonPulse})`;
+    ctx.fillRect(city.landmarks.gunshop.x - 56, city.landmarks.gunshop.y - 46, 112, 26);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('GUNS', city.landmarks.gunshop.x, city.landmarks.gunshop.y - 26);
+    ctx.textAlign = 'left';
+  }
 
   // Marina boats in the southern sea.
   for (const boat of city.boats) {
@@ -673,6 +793,11 @@ function render() {
   }
 
   drawParticles(ctx, G.particles);
+
+  // Hidden stashes glow until Milo finds them.
+  for (const s of G.stashes.spots) {
+    if (!s.taken) drawStash(ctx, s, G.time);
+  }
 
   // Waypoint beacon.
   if (G.waypoint) {
@@ -708,8 +833,27 @@ function render() {
     if (car.health > 0) drawCar(ctx, car);
   }
   if (G.tailCar && G.tailCar.health > 0) drawCar(ctx, G.tailCar);
+  // Headlight cones after dark: the player's car and the traffic ahead.
+  if (isNight) {
+    for (const car of G.allCars) {
+      if (car.health <= 0) continue;
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+      ctx.fillStyle = 'rgba(255,240,170,0.07)';
+      ctx.beginPath();
+      ctx.moveTo(20, -8);
+      ctx.lineTo(190, -46);
+      ctx.lineTo(190, 46);
+      ctx.lineTo(20, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
   for (const ped of G.peds) drawPedestrian(ctx, ped);
   for (const off of G.police.officers) drawOfficer(ctx, off);
+  if (G.police.heli) drawHelicopter(ctx, G.police.heli, isNight);
   for (const e of G.enemies) drawEnemy(ctx, e);
   if (G.player.inCar) {
     // Player is inside the car; draw the car already handled above.
@@ -777,6 +921,7 @@ function render() {
   drawHud(ctx, G, W, H);
   if (G.screen === 'pause') drawPause(ctx, W, H, G);
   if (G.screen === 'log') drawMissionLog(ctx, W, H, G);
+  if (G.screen === 'shop') drawShop(ctx, W, H, G, G.shopMessage);
   if (G.screen === 'over') drawGameOver(ctx, W, H, G.overReason || 'Milo is down.');
 }
 

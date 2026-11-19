@@ -39,7 +39,7 @@ test('out-of-range values are clamped, not trusted', () => {
   assert.equal(back.cash, 250);
   assert.equal(back.health, -5); // health is a plain number; gameplay clamps it
   assert.equal(back.ammo, 0);
-  assert.equal(back.missionIndex, 5);
+  assert.equal(back.missionIndex, 8);
   assert.deepEqual(back.missionsDone, ['m1']);
   assert.equal(back.playerX, 1400);
 });
